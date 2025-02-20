@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时语音聊天</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .container {
+            text-align: center;
+            padding: 20px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #status {
+            margin: 20px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>实时语音聊天</h1>
+        <button id="startButton">开始录音</button>
+        <div id="status">等待连接...</div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        let isRecording = false;
+        let mediaRecorder;
+        let audioChunks = [];
+
+        // 初始化录音   
+        async function initRecorder() {
+            console.log('初始化录音设备...');
+            try {
+                // Request audio stream with specific constraints
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: 16000,
+                        sampleSize: 16,
+                        channelCount: 1
+                    }
+                });
+                console.log('麦克风权限获取成功');
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                    console.log('收到音频数据片段');
+                };
+
+                mediaRecorder.onstop = () => {
+                    console.log('录音停止');
+                    // 将所有音频片段合并后发送
+                    const audioData = new Blob(audioChunks, { type: 'audio/wav' });
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const audioData = reader.result;
+                        console.log('发送完整的音频数据到服务器');
+                        socket.emit('audio-data', audioData);
+                    };
+                    reader.readAsArrayBuffer(audioData);
+                    audioChunks = [];
+                };
+            } catch (err) {
+                console.error('获取麦克风权限失败:', err);
+                document.getElementById('status').textContent = '麦克风权限被拒绝';
+            }
+        }
+
+        // 开始/停止录音
+        document.getElementById('startButton').addEventListener('click', async () => {
+            if (!isRecording) {
+                console.log('开始录音...');
+                await initRecorder();
+                mediaRecorder.start();
+                console.log('录音已开始');
+                isRecording = true;
+                document.getElementById('startButton').textContent = '停止录音';
+                document.getElementById('status').textContent = '正在录音...';
+            } else {
+                console.log('停止录音...');
+                mediaRecorder.stop();
+                isRecording = false;
+                document.getElementById('startButton').textContent = '开始录音';
+                document.getElementById('status').textContent = '等待录音...';
+            }
+        });
+
+        // 连接服务器
+        socket.on('connect', () => {
+            console.log('连接到服务器');
+            document.getElementById('status').textContent = '已连接到服务器';
+        });
+
+        // 接收服务器回复
+        socket.on('audio-response', (response) => {
+            console.log('收到服务器回复:', response);
+            if (response.startsWith('错误:')) {
+                document.getElementById('status').textContent = response;
+                return;
+            }
+            // 播放回复的音频
+            const audioBlob = new Blob([response], { type: 'audio/wav' });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            audio.play();
+        });
+
+        // 初始化
+        initRecorder();
+    </script>
+</body>
+</html> 
